@@ -7264,6 +7264,8 @@ class MeOut(BaseModel):
     signup_source: Optional[str] = None
     signup_code_label: Optional[str] = None
     product_scope: Optional[str] = None
+    auth_status: Optional[str] = None
+    pending_approval: Optional[bool] = False
     terms_accepted_at: Optional[int] = None
     terms_version: Optional[str] = None
     marketing_consent: Optional[bool] = False
@@ -7284,6 +7286,7 @@ def get_me(user=Depends(get_current_user), db: Session = Depends(get_db)):
     if not u:
         raise HTTPException(status_code=401, detail="Not authenticated")
     admin_access = _user_has_admin_console_access(u)
+    auth_status = _auth_status_for_user(u)
     return MeOut(
         id=u.id,
         org_slug=u.org_slug,
@@ -7297,6 +7300,8 @@ def get_me(user=Depends(get_current_user), db: Session = Depends(get_db)):
         signup_source=getattr(u, "signup_source", None),
         signup_code_label=getattr(u, "signup_code_label", None),
         product_scope=getattr(u, "product_scope", None),
+        auth_status=auth_status,
+        pending_approval=(auth_status == "pending_approval"),
         terms_accepted_at=u.terms_accepted_at,
         terms_version=u.terms_version,
         marketing_consent=bool(u.marketing_consent),
