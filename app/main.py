@@ -3592,11 +3592,19 @@ def chat(
     ):
     # STAB: resolve_org — tenant sempre do JWT
     org = _resolve_org(user, x_org_slug)
-    db_user = db.execute(select(User).where(User.id == user.get("sub"), User.org_slug == org)).scalar_one_or_none()
+    db_user = db.execute(
+        select(User).where(User.id == user.get("sub"), User.org_slug == org)
+    ).scalar_one_or_none()
     if not db_user:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    if db_user.role != "admin" and not bool(getattr(db_user, "onboarding_completed", False)):
-        raise HTTPException(status_code=403, detail="Onboarding incomplete")
+
+    # HOTFIX:
+    # Do not block text chat for users still finishing onboarding inside the console.
+    # Keep blocking only real approval problems.
+    auth_status = _auth_status_for_user(db_user)
+    if db_user.role != "admin" and auth_status == "pending_approval":
+        raise HTTPException(status_code=403, detail="User pending approval")
+
     uid = user.get("sub")
 
     # Ensure thread (create if new, ACL-check if existing)
