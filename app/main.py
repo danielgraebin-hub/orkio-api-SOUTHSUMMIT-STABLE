@@ -541,7 +541,7 @@ def _auth_status_for_user(u: Optional[User]) -> str:
         return "approved_ready"
     return "approved_onboarding_pending"
 
-def _build_auth_response(u: User, org: str, usage_tier: Optional[str], *, ip: Optional[str] = None) -> Dict[str, Any]:
+def _build_auth_response(u: User, org: str, usage_tier: Optional[str], *, ip: Optional[str] = None, auth_context: Optional[str] = None) -> Dict[str, Any]:
     user_payload = _serialize_user_payload(u, usage_tier)
     auth_status = _auth_status_for_user(u)
     onboarding_completed = bool(user_payload.get("onboarding_completed"))
@@ -567,11 +567,37 @@ def _build_auth_response(u: User, org: str, usage_tier: Optional[str], *, ip: Op
         "signup_code_label": getattr(u, "signup_code_label", None),
         "product_scope": getattr(u, "product_scope", None),
         "onboarding_completed": onboarding_completed,
+        "auth_issued_at": now_ts(),
     }
+    if auth_context:
+        token_payload["auth_context"] = auth_context
     payload["access_token"] = mint_token(token_payload)
     payload["token_type"] = "bearer"
     payload["redirect_to"] = "/admin" if _user_has_admin_console_access(u) else "/app"
     return payload
+
+
+def _build_fresh_auth_response(
+    db: Session,
+    org: str,
+    user_id: str,
+    *,
+    usage_tier: Optional[str] = None,
+    auth_context: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Re-read the user from the database after a critical auth transition and mint
+    a fresh JWT from the canonical persisted state. This avoids issuing tokens
+    with stale claims right after register / OTP / onboarding transitions.
+    """
+    fresh_user = db.execute(
+        select(User).where(User.id == user_id, User.org_slug == org)
+    ).scalar_one_or_none()
+    if not fresh_user:
+        raise HTTPException(status_code=404, detail="User not found after auth transition")
+
+    resolved_usage_tier = usage_tier or getattr(fresh_user, "usage_tier", None) or "summit_standard"
+    return _build_auth_response(fresh_user, org, resolved_usage_tier, auth_context=auth_context)
 
 def enable_streaming() -> bool:
     return os.getenv("ENABLE_STREAMING", "0").strip() in ("1", "true", "True")
@@ -2081,7 +2107,7 @@ def _save_user_onboarding_compat(
     db.refresh(u)
 
     usage_tier = getattr(u, "usage_tier", None)
-    fresh = _build_auth_response(u, org, usage_tier)
+    fresh = _build_fresh_auth_response(db, org, u.id, usage_tier=usage_tier, auth_context="onboarding_complete")
     return {
         "status": "ok",
         "user": _serialize_user_payload(u, usage_tier),
@@ -2864,7 +2890,7 @@ def register(inp: RegisterIn, request: Request = None, x_org_slug: Optional[str]
     except Exception:
         logger.exception("ADMIN_SYNC_FAILED register user_id=%s", getattr(u, "id", None))
 
-    response = _build_auth_response(u, org, usage_tier)
+    response = _build_fresh_auth_response(db, org, u.id, usage_tier=usage_tier, auth_context="register")
 
     if response.get("pending_approval"):
         response["message"] = "Conta criada com sucesso. Sua identidade será verificada por OTP no login e o acesso ao app será liberado após aprovação manual."
@@ -2970,7 +2996,7 @@ def login(inp: LoginIn, x_org_slug: Optional[str] = Header(default=None), db: Se
                 raise HTTPException(status_code=500, detail="Falha ao enviar código de verificação. Tente novamente.")
         return {"pending_otp": True, "message": "Enviamos um código de verificação para seu e-mail. Digite-o para continuar.", "email": email, "tenant": org}
 
-    response = _build_auth_response(u, org, usage_tier)
+    response = _build_fresh_auth_response(db, org, u.id, usage_tier=usage_tier, auth_context="login")
     if response.get("pending_approval"):
         return response
 
@@ -6874,7 +6900,7 @@ def otp_verify(inp: OtpVerifyIn, request: Request = None, db: Session = Depends(
     except Exception:
         pass
 
-    response = _build_auth_response(u, org, usage_tier)
+    response = _build_fresh_auth_response(db, org, u.id, usage_tier=usage_tier, auth_context="otp_verify")
     if response.get("pending_approval"):
         response["message"] = "Identidade validada. Seu acesso ainda depende de aprovação manual."
         return response
@@ -6953,7 +6979,7 @@ def login_verify_otp(inp: OtpVerifyIn, request: Request = None, db: Session = De
 
     _create_user_session(db, u.id, org, ip, getattr(u, "signup_code_label", None), usage_tier)
 
-    response = _build_auth_response(u, org, usage_tier)
+    response = _build_fresh_auth_response(db, org, u.id, usage_tier=usage_tier, auth_context="login_verify_otp")
     if response.get("pending_approval"):
         response["message"] = "Identidade validada. Seu acesso ainda depende de aprovação manual."
         response["authenticated"] = False
