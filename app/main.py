@@ -7090,7 +7090,20 @@ def reset_password(inp: ResetPasswordIn, x_org_slug: Optional[str] = Header(defa
         audit(db, org, u.id, "auth.reset_password", request_id="reset", path="/api/auth/reset-password", status_code=200, latency_ms=0, meta={"email": u.email})
     except Exception:
         pass
-    return {"ok": True, "message": "Password updated successfully."}
+    try:
+        usage_tier = getattr(u, "usage_tier", None) or "summit_standard"
+        auth_payload = _build_fresh_auth_response(
+            db,
+            org,
+            u.id,
+            usage_tier=usage_tier,
+            auth_context="reset_password",
+        )
+        auth_payload["ok"] = True
+        auth_payload["message"] = "Password updated successfully."
+        return auth_payload
+    except Exception:
+        return {"ok": True, "message": "Password updated successfully."}
 
 
 @app.post("/api/auth/change-password")
