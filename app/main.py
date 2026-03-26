@@ -911,6 +911,11 @@ class ResetPasswordIn(BaseModel):
     password: str = Field(min_length=6, max_length=256)
     password_confirm: str = Field(min_length=6, max_length=256)
 
+class ChangePasswordIn(BaseModel):
+    current_password: str = Field(min_length=1, max_length=256)
+    new_password: str = Field(min_length=6, max_length=256)
+    new_password_confirm: str = Field(min_length=6, max_length=256)
+
 class FounderHandoffIn(BaseModel):
     thread_id: Optional[str] = None
     interest_type: str = Field(default="general", min_length=1, max_length=64)
@@ -7086,6 +7091,35 @@ def reset_password(inp: ResetPasswordIn, x_org_slug: Optional[str] = Header(defa
     except Exception:
         pass
     return {"ok": True, "message": "Password updated successfully."}
+
+
+@app.post("/api/auth/change-password")
+def change_password(inp: ChangePasswordIn, x_org_slug: Optional[str] = Header(default=None), user=Depends(get_current_user), db: Session = Depends(get_db)):
+    org = _resolve_org(user, x_org_slug)
+    uid = user.get("sub")
+
+    if inp.new_password != inp.new_password_confirm:
+        raise HTTPException(status_code=400, detail="Password confirmation does not match.")
+
+    u = db.execute(select(User).where(User.id == uid, User.org_slug == org)).scalar_one_or_none()
+    if not u:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    if not verify_password(inp.current_password, u.salt, u.pw_hash):
+        raise HTTPException(status_code=400, detail="Current password is invalid.")
+
+    salt = new_salt()
+    u.salt = salt
+    u.pw_hash = pbkdf2_hash(inp.new_password, salt)
+    db.add(u)
+    db.commit()
+
+    try:
+        audit(db, org, uid, "auth.change_password", request_id="change_password", path="/api/auth/change-password", status_code=200, latency_ms=0, meta={"email": u.email})
+    except Exception:
+        pass
+
+    return {"ok": True, "message": "Password changed successfully."}
 
 @app.post("/api/founder/handoff")
 def founder_handoff(inp: FounderHandoffIn, x_org_slug: Optional[str] = Header(default=None), user=Depends(get_current_user), db: Session = Depends(get_db)):
