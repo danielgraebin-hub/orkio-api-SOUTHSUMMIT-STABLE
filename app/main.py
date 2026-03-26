@@ -2065,17 +2065,43 @@ def _save_user_onboarding_compat(
         }
         return aliases.get(raw, "explore")
 
-    incoming_role = _clean_text(payload.role) or _clean_text(payload.profile_role)
-    incoming_country = _clean_text(payload.country) or getattr(u, "country", None)
-    incoming_language = (
-        _clean_text(payload.language)
-        or _clean_text(payload.preferred_language)
-        or getattr(u, "language", None)
-    )
-    incoming_whatsapp = _clean_text(payload.whatsapp) or _clean_text(payload.whatsapp_number)
+    company = _clean_text(payload.company)
+    profile_role = _clean_text(payload.role) or _clean_text(payload.profile_role)
+    user_type = _normalize_user_type(payload.user_type) if _clean_text(payload.user_type) else ""
+    intent = _normalize_intent(payload.intent) if _clean_text(payload.intent) else ""
+    notes = _clean_text(payload.notes)
+    country_raw = _clean_text(payload.country)
+    language_raw = _clean_text(payload.language) or _clean_text(payload.preferred_language)
+    whatsapp = _clean_text(payload.whatsapp) or _clean_text(payload.whatsapp_number)
 
-    country = _normalize_country(incoming_country)
-    language = _normalize_language(incoming_language, country)
+    missing_fields = []
+    if not company:
+        missing_fields.append("company")
+    if not profile_role:
+        missing_fields.append("profile_role")
+    if not user_type:
+        missing_fields.append("user_type")
+    if not intent:
+        missing_fields.append("intent")
+    if not country_raw:
+        missing_fields.append("country")
+    if not language_raw:
+        missing_fields.append("language")
+    if not whatsapp:
+        missing_fields.append("whatsapp")
+
+    if missing_fields:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "missing_required_onboarding_fields",
+                "missing_fields": missing_fields,
+                "message": "Preencha todos os campos obrigatórios do onboarding.",
+            },
+        )
+
+    country = _normalize_country(country_raw)
+    language = _normalize_language(language_raw, country)
 
     try:
         logger.warning(
@@ -2083,23 +2109,23 @@ def _save_user_onboarding_compat(
             org,
             uid,
             sorted(list(payload.model_dump(exclude_none=False).keys())) if hasattr(payload, "model_dump") else [],
-            _normalize_user_type(payload.user_type or getattr(u, "user_type", None)),
-            _normalize_intent(payload.intent or getattr(u, "intent", None)),
+            user_type,
+            intent,
             country,
             language,
-            bool(incoming_whatsapp),
+            bool(whatsapp),
         )
     except Exception:
         pass
 
-    u.company = _clean_text(payload.company) or getattr(u, "company", None)
-    u.profile_role = incoming_role or getattr(u, "profile_role", None)
-    u.user_type = _normalize_user_type(payload.user_type or getattr(u, "user_type", None))
-    u.intent = _normalize_intent(payload.intent or getattr(u, "intent", None))
-    u.notes = _clean_text(payload.notes) or getattr(u, "notes", None)
+    u.company = company
+    u.profile_role = profile_role
+    u.user_type = user_type
+    u.intent = intent
+    u.notes = notes or getattr(u, "notes", None)
     u.country = country
     u.language = language
-    u.whatsapp = incoming_whatsapp or getattr(u, "whatsapp", None)
+    u.whatsapp = whatsapp
     u.onboarding_completed = bool(payload.onboarding_completed)
 
     db.add(u)
