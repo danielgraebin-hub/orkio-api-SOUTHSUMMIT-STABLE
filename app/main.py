@@ -2924,7 +2924,7 @@ def register(inp: RegisterIn, request: Request = None, x_org_slug: Optional[str]
     response = _build_fresh_auth_response(db, org, u.id, usage_tier=usage_tier, auth_context="register")
 
     if response.get("pending_approval"):
-        response["message"] = "Conta criada com sucesso. Sua identidade será verificada por OTP no login e o acesso ao app será liberado após aprovação manual."
+        response["message"] = "Conta criada com sucesso. Seu acesso ao app será liberado após aprovação manual."
         return response
 
     _create_user_session(db, u.id, org, ip, signup_code_label, usage_tier)
@@ -2962,7 +2962,7 @@ def login(inp: LoginIn, x_org_slug: Optional[str] = Header(default=None), db: Se
         raise HTTPException(status_code=403, detail="Acesso ao Summit encerrado.")
 
     # Summit 2FA: password + OTP (OTP is issued only after password verification)
-    require_otp = SUMMIT_MODE and (os.getenv("SUMMIT_REQUIRE_OTP", "true").lower() in ("1", "true", "yes"))
+    require_otp = False  # DEMO MODE: password-only login enabled temporarily
     otp_for_admins = (os.getenv("SUMMIT_OTP_FOR_ADMINS", "false").lower() in ("1", "true", "yes"))
     if require_otp and (u.role != "admin" or otp_for_admins):
         logger.warning(
