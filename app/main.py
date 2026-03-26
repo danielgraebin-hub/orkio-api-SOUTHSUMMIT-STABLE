@@ -1258,7 +1258,7 @@ def _generate_reset_token() -> str:
 
 def _send_password_reset_email(to_email: str, reset_token: str) -> bool:
     base_url = (os.getenv("APP_BASE_URL", "") or os.getenv("PUBLIC_APP_URL", "")).strip().rstrip("/")
-    reset_link = f"{base_url}/auth?reset_token={reset_token}" if base_url else reset_token
+    reset_link = f"{base_url}/auth?mode=reset&token={reset_token}" if base_url else reset_token
     subject = "Orkio | Redefinição de senha"
     text_body = (
         "Recebemos uma solicitação para redefinir sua senha do Orkio.\n\n"
