@@ -1547,21 +1547,23 @@ def _require_thread_member(db: Session, org: str, thread_id: str, user_id: str) 
     """
     Ensures user is member of thread.
     Auto-heals legacy threads created before thread_members existed.
+    Falls back to message ownership when Thread has no user_id column.
     """
     m = _check_thread_member(db, org, thread_id, user_id)
     if m:
         return m
 
-    # AUTO-HEAL: legacy threads created before thread_members
-    t = db.execute(
-        select(Thread).where(
-            Thread.org_slug == org,
-            Thread.id == thread_id,
-            Thread.user_id == user_id,
-        )
+    # AUTO-HEAL: if the user has authored messages in this legacy thread,
+    # recreate membership as owner.
+    legacy_msg = db.execute(
+        select(Message).where(
+            Message.org_slug == org,
+            Message.thread_id == thread_id,
+            Message.user_id == user_id,
+        ).limit(1)
     ).scalar_one_or_none()
 
-    if t:
+    if legacy_msg:
         tm = ThreadMember(
             id=new_id(),
             org_slug=org,
