@@ -1544,11 +1544,37 @@ def _check_thread_member(db: Session, org: str, thread_id: str, user_id: str) ->
     ).scalar_one_or_none()
 
 def _require_thread_member(db: Session, org: str, thread_id: str, user_id: str) -> ThreadMember:
-    """Raise 403 if user is not a member of the thread."""
+    """
+    Ensures user is member of thread.
+    Auto-heals legacy threads created before thread_members existed.
+    """
     m = _check_thread_member(db, org, thread_id, user_id)
-    if not m:
-        raise HTTPException(status_code=403, detail="Acesso negado a esta thread")
-    return m
+    if m:
+        return m
+
+    # AUTO-HEAL: legacy threads created before thread_members
+    t = db.execute(
+        select(Thread).where(
+            Thread.org_slug == org,
+            Thread.id == thread_id,
+            Thread.user_id == user_id,
+        )
+    ).scalar_one_or_none()
+
+    if t:
+        tm = ThreadMember(
+            id=new_id(),
+            org_slug=org,
+            thread_id=thread_id,
+            user_id=user_id,
+            role="owner",
+            created_at=now_ts(),
+        )
+        db.add(tm)
+        db.commit()
+        return tm
+
+    raise HTTPException(status_code=403, detail="Acesso negado a esta thread")
 
 def _require_thread_admin_or_owner(db: Session, org: str, thread_id: str, user_id: str) -> ThreadMember:
     """Raise 403 if user is not owner or admin of the thread."""
