@@ -101,6 +101,7 @@ def _complete_onboarding(inp: OnboardingIn, user: Dict[str, Any], db: Session):
     if not (u.role == "admin" or getattr(u, "approved_at", None) or _is_summit_eligible(u)):
         raise HTTPException(status_code=403, detail="Manual approval required before onboarding.")
 
+    # Persist incoming values
     u.company = (inp.company or "").strip() or None
     u.profile_role = (inp.role or "").strip() or None
     u.user_type = _normalize_user_type(inp.user_type)
@@ -111,8 +112,38 @@ def _complete_onboarding(inp: OnboardingIn, user: Dict[str, Any], db: Session):
     u.notes = (inp.notes or "").strip() or None
     u.onboarding_completed = bool(inp.onboarding_completed)
 
-    if not u.user_type or not u.intent or not u.country or not u.language:
-        raise HTTPException(status_code=400, detail="Missing required fields")
+    # Enterprise validation (required fields enforcement)
+    missing = []
+
+    if not u.company:
+        missing.append("company")
+
+    if not u.profile_role:
+        missing.append("profile_role")
+
+    if not u.user_type:
+        missing.append("user_type")
+
+    if not u.intent:
+        missing.append("intent")
+
+    if not u.country:
+        missing.append("country")
+
+    if not u.language:
+        missing.append("language")
+
+    if not u.whatsapp:
+        missing.append("whatsapp")
+
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "Missing required onboarding fields",
+                "missing_fields": missing,
+            },
+        )
 
     db.add(u)
     db.commit()
